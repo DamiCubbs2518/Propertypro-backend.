@@ -201,3 +201,4 @@ CREATE INDEX idx_maintenance_tenant ON maintenance_complaints(tenant_id);
 CREATE INDEX idx_maintenance_property ON maintenance_complaints(property_id);
 CREATE INDEX idx_bookings_unit ON shortlet_bookings(shortlet_unit_id);
 CREATE INDEX idx_overheads_property ON property_overheads(property_id);
+
