@@ -8,6 +8,7 @@ const paymentsRouter = require('./routes/payments');
 const agentsRouter = require('./routes/agents');
 const shortletRouter = require('./routes/shortlet');
 const complaintsRouter = require('./routes/complaints');
+const financeRouter = require('./routes/finance');
 
 const app = express();
 app.use(cors());
@@ -19,6 +20,7 @@ app.use('/api/payments', paymentsRouter);
 app.use('/api/agents', agentsRouter);
 app.use('/api/shortlet', shortletRouter);
 app.use('/api/complaints', complaintsRouter);
+app.use('/api/finance', financeRouter);
 
 app.get('/', (req, res) => res.send('PropertyPro API is running'));
 
