@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
+const { authenticate, requireRoles, requireTenantAccess } = require('../middleware/auth');
 
 const STATUS_MAP = { pending: 'Pending', paid: 'Paid', overdue: 'Overdue' };
 
@@ -63,7 +64,7 @@ const BASE_QUERY = `
   ) misconducts ON true
 `;
 
-router.get('/', async (req, res) => {
+router.get('/', authenticate, requireRoles('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(`${BASE_QUERY} ORDER BY t.created_at DESC`);
     res.json(result.rows.map(toPaymentRecord));
@@ -73,7 +74,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-router.get('/by-agent/:agentId', async (req, res) => {
+router.get('/by-agent/:agentId', authenticate, async (req, res) => {
+  if (req.auth.role !== 'ADMIN' && (req.auth.role !== 'AGENT' || req.auth.agentId !== req.params.agentId)) return res.status(403).json({ error: 'You cannot access this tenant list.' });
   try {
     const result = await pool.query(
       `${BASE_QUERY} WHERE p.agent_id = $1 ORDER BY t.created_at DESC`,
@@ -86,7 +88,7 @@ router.get('/by-agent/:agentId', async (req, res) => {
   }
 });
 
-router.get('/:id', async (req, res) => {
+router.get('/:id', authenticate, requireTenantAccess, async (req, res) => {
   try {
     const result = await pool.query(`${BASE_QUERY} WHERE t.id = $1`, [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant not found' });
@@ -113,7 +115,7 @@ router.get('/link/:token', async (req, res) => {
   }
 });
 
-router.post('/', async (req, res) => {
+router.post('/', authenticate, requireRoles('ADMIN'), async (req, res) => {
   try {
     const { property_id, name, email, phone, rent_amount, rent_cycle, multi_year_eligible } = req.body;
     const result = await pool.query(
@@ -128,7 +130,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-router.put('/:id', async (req, res) => {
+router.put('/:id', authenticate, requireRoles('ADMIN'), async (req, res) => {
   try {
     const { name, email, phone, rent_amount, rent_cycle } = req.body;
     const result = await pool.query(
@@ -144,7 +146,7 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-router.post('/:id/misconduct', async (req, res) => {
+router.post('/:id/misconduct', authenticate, requireRoles('ADMIN'), async (req, res) => {
   try {
     const { offenseTitle, description, penaltyAmount, proofImageUrl, date } = req.body;
     const result = await pool.query(
@@ -159,7 +161,7 @@ router.post('/:id/misconduct', async (req, res) => {
   }
 });
 
-router.put('/:id/remit-commission', async (req, res) => {
+router.put('/:id/remit-commission', authenticate, requireRoles('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query(`
       UPDATE commissions SET is_remitted = true, remitted_at = now()
@@ -176,7 +178,7 @@ router.put('/:id/remit-commission', async (req, res) => {
   }
 });
 
-router.put('/:id/multi-year', async (req, res) => {
+router.put('/:id/multi-year', authenticate, requireRoles('ADMIN'), async (req, res) => {
   try {
     const { isEligible } = req.body;
     const result = await pool.query(
@@ -191,7 +193,7 @@ router.put('/:id/multi-year', async (req, res) => {
   }
 });
 
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', authenticate, requireRoles('ADMIN'), async (req, res) => {
   try {
     const result = await pool.query('DELETE FROM tenants WHERE id = $1 RETURNING id', [req.params.id]);
     if (result.rows.length === 0) return res.status(404).json({ error: 'Tenant not found' });
