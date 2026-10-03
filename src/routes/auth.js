@@ -60,13 +60,14 @@ router.post('/login', async (req, res) => {
     });
 
     res.json({
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      agentId: user.agent_id,
-      tenantId: user.tenant_id,
-    });
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  role: user.role,
+  agentId: user.agent_id,
+  tenantId: user.tenant_id,
+  token,
+});
   } catch (err) {
     console.error(err);
 
