@@ -22,6 +22,14 @@ router.post('/login', async (req, res) => {
       [cleanEmail]
     );
 
+    console.log('LOGIN DEBUG:', {
+      email: cleanEmail,
+      rowsFound: result.rows.length,
+      userEmail: result.rows[0]?.email,
+      userRole: result.rows[0]?.role,
+      hasPasswordHash: !!result.rows[0]?.password_hash,
+    });
+
     const user = result.rows[0];
 
     if (!user) {
@@ -60,14 +68,14 @@ router.post('/login', async (req, res) => {
     });
 
     res.json({
-  id: user.id,
-  name: user.name,
-  email: user.email,
-  role: user.role,
-  agentId: user.agent_id,
-  tenantId: user.tenant_id,
-  token,
-});
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role: user.role,
+      agentId: user.agent_id,
+      tenantId: user.tenant_id,
+      token,
+    });
   } catch (err) {
     console.error(err);
 
