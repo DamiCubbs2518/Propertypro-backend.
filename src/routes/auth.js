@@ -39,9 +39,14 @@ router.post('/login', async (req, res) => {
     }
 
     const validPassword = await bcrypt.compare(
-      password,
-      user.password_hash
-    );
+  password,
+  user.password_hash
+);
+
+console.log('PASSWORD DEBUG:', {
+  validPassword,
+  hashLength: user.password_hash?.length,
+});
 
     if (!validPassword) {
       return res.status(401).json({
