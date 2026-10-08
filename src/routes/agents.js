@@ -20,7 +20,7 @@ function toAgentItem(row) {
       parseFloat(row.unremitted_commission) || 0,
     remittedCommission:
       parseFloat(row.remitted_commission) || 0,
-    status: row.status,
+    status: row.status || 'Active',
   };
 }
 
@@ -131,8 +131,6 @@ router.post('/', async (req, res) => {
       name,
       email,
       phone,
-      commission_rate,
-      status,
       password,
     } = req.body;
 
@@ -168,7 +166,7 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
     transactionStarted = true;
 
-    /* Check duplicate user email */
+    /* Check duplicate user */
 
     const existingUser = await client.query(
       `
@@ -189,7 +187,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /* Check duplicate agent email */
+    /* Check duplicate agent */
 
     const existingAgent = await client.query(
       `
@@ -210,7 +208,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /* Create agent */
+    /* Create agent using only confirmed columns */
 
     const agentResult = await client.query(
       `
@@ -218,26 +216,22 @@ router.post('/', async (req, res) => {
         (
           name,
           email,
-          phone,
-          commission_rate,
-          status
+          phone
         )
       VALUES
-        ($1, $2, $3, $4, $5)
+        ($1, $2, $3)
       RETURNING *
       `,
       [
         cleanName,
         cleanEmail,
         cleanPhone,
-        Number(commission_rate) || 10,
-        status || 'Active',
       ]
     );
 
     const agent = agentResult.rows[0];
 
-    /* Hash password */
+    /* Create password */
 
     const passwordHash = await bcrypt.hash(cleanPassword, 12);
 
