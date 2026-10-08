@@ -9,7 +9,7 @@ function toAgentItem(row) {
     name: row.name,
     email: row.email,
     phone: row.phone,
-    specialty: row.specialty || '',
+    specialty: '',
     assignedPropertiesCount:
       parseInt(row.assigned_properties_count, 10) || 0,
     managedTenantsCount:
@@ -17,12 +17,12 @@ function toAgentItem(row) {
     totalLeaseVolume:
       parseFloat(row.total_lease_volume) || 0,
     unremittedCommission:
-      parseFloat(row.unremitted_commission, 10) || 0,
+      parseFloat(row.unremitted_commission) || 0,
     remittedCommission:
-      parseFloat(row.remitted_commission, 10) || 0,
+      parseFloat(row.remitted_commission) || 0,
     status: row.status,
   };
-};
+}
 
 /* =========================
    GET ALL AGENTS
@@ -99,21 +99,11 @@ router.get('/commissions', async (req, res) => {
         c.amount_owed,
         c.is_remitted,
         c.remitted_at
-
       FROM commissions c
-
-      JOIN agents a
-        ON a.id = c.agent_id
-
-      JOIN payments pay
-        ON pay.id = c.payment_id
-
-      JOIN tenants t
-        ON t.id = pay.tenant_id
-
-      JOIN properties p
-        ON p.id = t.property_id
-
+      JOIN agents a ON a.id = c.agent_id
+      JOIN payments pay ON pay.id = c.payment_id
+      JOIN tenants t ON t.id = pay.tenant_id
+      JOIN properties p ON p.id = t.property_id
       ORDER BY c.created_at DESC
     `);
 
@@ -141,7 +131,6 @@ router.post('/', async (req, res) => {
       name,
       email,
       phone,
-      specialty,
       commission_rate,
       status,
       password,
@@ -179,40 +168,11 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
     transactionStarted = true;
 
-    /* =========================
-       CHECK USERS TABLE
-    ========================= */
-
-    const userColumnsResult = await client.query(`
-      SELECT column_name
-      FROM information_schema.columns
-      WHERE table_schema = 'public'
-        AND table_name = 'users'
-    `);
-
-    const userColumns = new Set(
-      userColumnsResult.rows.map((row) => row.column_name)
-    );
-
-    if (!userColumns.has('password_hash')) {
-      throw new Error(
-        'The users table does not contain the password_hash column.'
-      );
-    }
-
-    if (!userColumns.has('role')) {
-      throw new Error(
-        'The users table does not contain the role column.'
-      );
-    }
-
-    /* =========================
-       CHECK DUPLICATE EMAIL
-    ========================= */
+    /* Check duplicate user email */
 
     const existingUser = await client.query(
       `
-      SELECT id, email
+      SELECT id
       FROM users
       WHERE LOWER(email) = $1
       LIMIT 1
@@ -229,13 +189,11 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /* =========================
-       CHECK DUPLICATE AGENT
-    ========================= */
+    /* Check duplicate agent email */
 
     const existingAgent = await client.query(
       `
-      SELECT id, email
+      SELECT id
       FROM agents
       WHERE LOWER(email) = $1
       LIMIT 1
@@ -252,9 +210,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /* =========================
-       CREATE AGENT
-    ========================= */
+    /* Create agent */
 
     const agentResult = await client.query(
       `
@@ -263,19 +219,17 @@ router.post('/', async (req, res) => {
           name,
           email,
           phone,
-          specialty,
           commission_rate,
           status
         )
       VALUES
-        ($1, $2, $3, $4, $5, $6)
+        ($1, $2, $3, $4, $5)
       RETURNING *
       `,
       [
         cleanName,
         cleanEmail,
         cleanPhone,
-        specialty ? String(specialty).trim() : null,
         Number(commission_rate) || 10,
         status || 'Active',
       ]
@@ -283,80 +237,33 @@ router.post('/', async (req, res) => {
 
     const agent = agentResult.rows[0];
 
-    /* =========================
-       HASH PASSWORD
-    ========================= */
+    /* Hash password */
 
     const passwordHash = await bcrypt.hash(cleanPassword, 12);
 
-    /* =========================
-       GET VALID AGENT ROLE
-    ========================= */
+    /* Create login account */
 
-    let agentRole = 'agent';
-
-    const existingAgentRole = await client.query(`
-      SELECT role
-      FROM users
-      WHERE LOWER(role::text) = 'agent'
-      LIMIT 1
-    `);
-
-    if (existingAgentRole.rows.length > 0) {
-      agentRole = existingAgentRole.rows[0].role;
-    }
-
-    /* =========================
-       CREATE LOGIN ACCOUNT
-    ========================= */
-
-    if (userColumns.has('agent_id')) {
-      await client.query(
-        `
-        INSERT INTO users
-          (
-            name,
-            email,
-            password_hash,
-            role,
-            agent_id
-          )
-        VALUES
-          ($1, $2, $3, $4, $5)
-        `,
-        [
-          cleanName,
-          cleanEmail,
-          passwordHash,
-          agentRole,
-          agent.id,
-        ]
-      );
-    } else {
-      await client.query(
-        `
-        INSERT INTO users
-          (
-            name,
-            email,
-            password_hash,
-            role
-          )
-        VALUES
-          ($1, $2, $3, $4)
-        `,
-        [
-          cleanName,
-          cleanEmail,
-          passwordHash,
-          agentRole,
-        ]
-      );
-    }
-
-    /* =========================
-       COMMIT
-    ========================= */
+    await client.query(
+      `
+      INSERT INTO users
+        (
+          name,
+          email,
+          password_hash,
+          role,
+          agent_id
+        )
+      VALUES
+        ($1, $2, $3, $4, $5)
+      `,
+      [
+        cleanName,
+        cleanEmail,
+        passwordHash,
+        'agent',
+        agent.id,
+      ]
+    );
 
     await client.query('COMMIT');
     transactionStarted = false;
