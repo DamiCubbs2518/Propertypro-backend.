@@ -268,7 +268,7 @@ router.post('/', async (req, res) => {
         cleanName,
         cleanEmail,
         passwordHash,
-        'AGENT',
+        'agent',
         agent.id,
       ]
     );
