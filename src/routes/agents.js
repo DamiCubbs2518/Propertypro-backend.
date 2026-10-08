@@ -208,7 +208,7 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /* Create agent using only confirmed columns */
+    /* Create agent */
 
     const agentResult = await client.query(
       `
@@ -235,7 +235,8 @@ router.post('/', async (req, res) => {
 
     const passwordHash = await bcrypt.hash(cleanPassword, 12);
 
-    /* Create login account */
+    /* Create login account
+       NOTE: users table does NOT have agent_id */
 
     await client.query(
       `
@@ -244,18 +245,16 @@ router.post('/', async (req, res) => {
           name,
           email,
           password_hash,
-          role,
-          agent_id
+          role
         )
       VALUES
-        ($1, $2, $3, $4, $5)
+        ($1, $2, $3, $4)
       `,
       [
         cleanName,
         cleanEmail,
         passwordHash,
         'agent',
-        agent.id,
       ]
     );
 
