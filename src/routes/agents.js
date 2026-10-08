@@ -17,12 +17,12 @@ function toAgentItem(row) {
     totalLeaseVolume:
       parseFloat(row.total_lease_volume) || 0,
     unremittedCommission:
-      parseFloat(row.unremitted_commission) || 0,
+      parseFloat(row.unremitted_commission, 10) || 0,
     remittedCommission:
-      parseFloat(row.remitted_commission) || 0,
+      parseFloat(row.remitted_commission, 10) || 0,
     status: row.status,
   };
-}
+};
 
 /* =========================
    GET ALL AGENTS
@@ -179,7 +179,37 @@ router.post('/', async (req, res) => {
     await client.query('BEGIN');
     transactionStarted = true;
 
-    /* Check duplicate login email */
+    /* =========================
+       CHECK USERS TABLE
+    ========================= */
+
+    const userColumnsResult = await client.query(`
+      SELECT column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'users'
+    `);
+
+    const userColumns = new Set(
+      userColumnsResult.rows.map((row) => row.column_name)
+    );
+
+    if (!userColumns.has('password_hash')) {
+      throw new Error(
+        'The users table does not contain the password_hash column.'
+      );
+    }
+
+    if (!userColumns.has('role')) {
+      throw new Error(
+        'The users table does not contain the role column.'
+      );
+    }
+
+    /* =========================
+       CHECK DUPLICATE EMAIL
+    ========================= */
+
     const existingUser = await client.query(
       `
       SELECT id, email
@@ -199,7 +229,10 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /* Check duplicate agent email */
+    /* =========================
+       CHECK DUPLICATE AGENT
+    ========================= */
+
     const existingAgent = await client.query(
       `
       SELECT id, email
@@ -219,7 +252,10 @@ router.post('/', async (req, res) => {
       });
     }
 
-    /* Create agent */
+    /* =========================
+       CREATE AGENT
+    ========================= */
+
     const agentResult = await client.query(
       `
       INSERT INTO agents
@@ -247,31 +283,80 @@ router.post('/', async (req, res) => {
 
     const agent = agentResult.rows[0];
 
-    /* Hash password */
+    /* =========================
+       HASH PASSWORD
+    ========================= */
+
     const passwordHash = await bcrypt.hash(cleanPassword, 12);
 
-    /* Create login account */
-    await client.query(
-      `
-      INSERT INTO users
-        (
-          name,
-          email,
-          password_hash,
-          role,
-          agent_id
-        )
-      VALUES
-        ($1, $2, $3, $4, $5)
-      `,
-      [
-        cleanName,
-        cleanEmail,
-        passwordHash,
-        'agent',
-        agent.id,
-      ]
-    );
+    /* =========================
+       GET VALID AGENT ROLE
+    ========================= */
+
+    let agentRole = 'agent';
+
+    const existingAgentRole = await client.query(`
+      SELECT role
+      FROM users
+      WHERE LOWER(role::text) = 'agent'
+      LIMIT 1
+    `);
+
+    if (existingAgentRole.rows.length > 0) {
+      agentRole = existingAgentRole.rows[0].role;
+    }
+
+    /* =========================
+       CREATE LOGIN ACCOUNT
+    ========================= */
+
+    if (userColumns.has('agent_id')) {
+      await client.query(
+        `
+        INSERT INTO users
+          (
+            name,
+            email,
+            password_hash,
+            role,
+            agent_id
+          )
+        VALUES
+          ($1, $2, $3, $4, $5)
+        `,
+        [
+          cleanName,
+          cleanEmail,
+          passwordHash,
+          agentRole,
+          agent.id,
+        ]
+      );
+    } else {
+      await client.query(
+        `
+        INSERT INTO users
+          (
+            name,
+            email,
+            password_hash,
+            role
+          )
+        VALUES
+          ($1, $2, $3, $4)
+        `,
+        [
+          cleanName,
+          cleanEmail,
+          passwordHash,
+          agentRole,
+        ]
+      );
+    }
+
+    /* =========================
+       COMMIT
+    ========================= */
 
     await client.query('COMMIT');
     transactionStarted = false;
@@ -293,8 +378,10 @@ router.post('/', async (req, res) => {
     console.error('CREATE AGENT ERROR:', err);
 
     return res.status(500).json({
-      error: 'Server error while creating agent.',
-      details: err.message,
+      error: err.message || 'Server error while creating agent.',
+      code: err.code || null,
+      detail: err.detail || null,
+      hint: err.hint || null,
     });
 
   } finally {
