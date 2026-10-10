@@ -1,4 +1,5 @@
-﻿const express = require('express');
+
+const express = require('express');
 const bcrypt = require('bcryptjs');
 
 const router = express.Router();
@@ -25,6 +26,7 @@ function toPaymentRecord(row) {
 
   return {
     id: row.id,
+    propertyId: row.property_id,
     tenantName: row.name,
     tenantEmail: row.email,
     property: row.property_name,
@@ -167,6 +169,7 @@ router.get('/me', authenticate, async (req, res) => {
 
     res.json({
       id: row.id,
+      propertyId: row.property_id,
       tenantName: row.name,
       tenantEmail: row.email,
       phone: row.phone,
@@ -178,7 +181,7 @@ router.get('/me', authenticate, async (req, res) => {
         row.property_name || 'Resident Unit',
 
       amount:
-        parseFloat(row.amount_due || row.rent_amount) || 0,
+        parseFloat(row.amount_due ?? row.rent_amount) || 0,
 
       status:
         STATUS_MAP[row.payment_status] || 'Pending',
@@ -195,8 +198,11 @@ router.get('/me', authenticate, async (req, res) => {
       multiYearEligible:
         row.multi_year_eligible || false,
 
-      amountOwed:
-        parseFloat(row.amount_due || row.rent_amount) || 0,
+      amountOwed: Math.max(
+        (parseFloat(row.amount_due ?? row.rent_amount) || 0) -
+          (parseFloat(row.amount_paid) || 0),
+        0
+      ),
 
       amountPaid:
         parseFloat(row.amount_paid) || 0,
@@ -363,6 +369,7 @@ router.post(
   requireRoles('ADMIN'),
   async (req, res) => {
     const client = await pool.connect();
+    let transactionStarted = false;
 
     try {
       const {
@@ -400,14 +407,13 @@ router.post(
 
       if (!cleanPassword || cleanPassword.length < 6) {
         return res.status(400).json({
-          error:
-            'Tenant password must be at least 6 characters.',
+          error: 'Tenant password must be at least 6 characters.',
         });
       }
 
       await client.query('BEGIN');
+      transactionStarted = true;
 
-      // Verify the property exists.
       const propertyResult = await client.query(
         `
           SELECT id
@@ -420,13 +426,13 @@ router.post(
 
       if (propertyResult.rows.length === 0) {
         await client.query('ROLLBACK');
+        transactionStarted = false;
 
         return res.status(404).json({
           error: 'Property not found.',
         });
       }
 
-      // Prevent duplicate login accounts.
       const existingUser = await client.query(
         `
           SELECT id
@@ -439,14 +445,13 @@ router.post(
 
       if (existingUser.rows.length > 0) {
         await client.query('ROLLBACK');
+        transactionStarted = false;
 
         return res.status(409).json({
-          error:
-            'A user account with this email already exists.',
+          error: 'A user account with this email already exists.',
         });
       }
 
-      // Create tenant record first.
       const tenantResult = await client.query(
         `
           INSERT INTO tenants (
@@ -474,14 +479,8 @@ router.post(
 
       const tenant = tenantResult.rows[0];
 
-      // Hash the password before storing it.
-      const passwordHash = await bcrypt.hash(
-        cleanPassword,
-        12
-      );
+      const passwordHash = await bcrypt.hash(cleanPassword, 12);
 
-      // Create the actual login account and link it
-      // directly to the tenant record.
       await client.query(
         `
           INSERT INTO users (
@@ -502,15 +501,15 @@ router.post(
       );
 
       await client.query('COMMIT');
+      transactionStarted = false;
 
       res.status(201).json(tenant);
     } catch (err) {
-      await client.query('ROLLBACK');
+      if (transactionStarted) {
+        await client.query('ROLLBACK').catch(() => {});
+      }
 
-      console.error(
-        'POST /api/tenants error:',
-        err
-      );
+      console.error('POST /api/tenants error:', err);
 
       res.status(500).json({
         error: 'Server error',
@@ -571,7 +570,6 @@ router.put(
         });
       }
 
-      // Keep the linked login account synchronized.
       await pool.query(
         `
           UPDATE users
