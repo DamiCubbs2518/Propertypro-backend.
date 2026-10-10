@@ -1,4 +1,4 @@
-const express = require('express');
+﻿const express = require('express');
 const bcrypt = require('bcryptjs');
 
 const router = express.Router();
@@ -16,7 +16,6 @@ const STATUS_MAP = {
   overdue: 'Overdue',
 };
 
-```js
 function toPaymentRecord(row) {
   const amountDue =
     parseFloat(row.amount_due ?? row.rent_amount) || 0;
@@ -51,7 +50,6 @@ function toPaymentRecord(row) {
     misconductStrikes: row.misconduct_strikes || [],
   };
 }
-```
 
 const BASE_QUERY = `
   SELECT
