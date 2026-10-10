@@ -16,14 +16,21 @@ const STATUS_MAP = {
   overdue: 'Overdue',
 };
 
+```js
 function toPaymentRecord(row) {
+  const amountDue =
+    parseFloat(row.amount_due ?? row.rent_amount) || 0;
+
+  const amountPaid =
+    parseFloat(row.amount_paid) || 0;
+
   return {
     id: row.id,
     tenantName: row.name,
     tenantEmail: row.email,
     property: row.property_name,
     unit: row.property_name,
-    amount: parseFloat(row.amount_due || row.rent_amount) || 0,
+    amount: amountDue,
     status: STATUS_MAP[row.payment_status] || 'Pending',
     date: row.payment_created_at || null,
     dueDate: row.period_end || null,
@@ -36,15 +43,15 @@ function toPaymentRecord(row) {
     agentCommissionRemitted:
       row.commission_remitted ?? undefined,
     multiYearEligible: row.multi_year_eligible || false,
-    amountOwed:
-      parseFloat(row.amount_due || row.rent_amount) || 0,
-    amountPaid: parseFloat(row.amount_paid) || 0,
+    amountOwed: Math.max(amountDue - amountPaid, 0),
+    amountPaid,
     leasePeriod:
       row.lease_period_label || row.rent_cycle || '',
     phone: row.phone,
     misconductStrikes: row.misconduct_strikes || [],
   };
 }
+```
 
 const BASE_QUERY = `
   SELECT

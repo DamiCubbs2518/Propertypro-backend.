@@ -1,15 +1,17 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
+
 const router = express.Router();
 const pool = require('../db');
 
-// POST /api/auth/login
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
   try {
-    const cleanEmail = String(email || '').trim().toLowerCase();
+    const cleanEmail = String(email || '')
+      .trim()
+      .toLowerCase();
 
     if (!cleanEmail || !password) {
       return res.status(400).json({
@@ -18,7 +20,11 @@ router.post('/login', async (req, res) => {
     }
 
     const result = await pool.query(
-      'SELECT * FROM users WHERE LOWER(email) = $1',
+      `
+      SELECT *
+      FROM users
+      WHERE LOWER(email) = $1
+      `,
       [cleanEmail]
     );
 
@@ -27,7 +33,8 @@ router.post('/login', async (req, res) => {
       rowsFound: result.rows.length,
       userEmail: result.rows[0]?.email,
       userRole: result.rows[0]?.role,
-      hasPasswordHash: !!result.rows[0]?.password_hash,
+      hasPasswordHash:
+        !!result.rows[0]?.password_hash,
     });
 
     const user = result.rows[0];
@@ -39,14 +46,14 @@ router.post('/login', async (req, res) => {
     }
 
     const validPassword = await bcrypt.compare(
-  password,
-  user.password_hash
-);
+      password,
+      user.password_hash
+    );
 
-console.log('PASSWORD DEBUG:', {
-  validPassword,
-  hashLength: user.password_hash?.length,
-});
+    console.log('PASSWORD DEBUG:', {
+      validPassword,
+      hashLength: user.password_hash?.length,
+    });
 
     if (!validPassword) {
       return res.status(401).json({
@@ -59,14 +66,19 @@ console.log('PASSWORD DEBUG:', {
         id: user.id,
         email: user.email,
         role: user.role,
+        agentId: user.agent_id,
+        tenantId: user.tenant_id,
       },
       process.env.JWT_SECRET,
-      { expiresIn: '1h' }
+      {
+        expiresIn: '1h',
+      }
     );
 
     res.cookie('auth_token', token, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
+      secure:
+        process.env.NODE_ENV === 'production',
       sameSite: 'lax',
       maxAge: 60 * 60 * 1000,
       path: '/',
@@ -82,7 +94,7 @@ console.log('PASSWORD DEBUG:', {
       token,
     });
   } catch (err) {
-    console.error(err);
+    console.error('LOGIN ERROR:', err);
 
     res.status(500).json({
       message: 'Server error',

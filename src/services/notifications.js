@@ -1,76 +1,110 @@
-const express = require('express');
-const router = express.Router();
 const pool = require('../db');
+const { sendEmail } = require('./email');
 
-const { authenticate } = require('../middleware/auth');
+async function createNotification({
+  recipientUserId,
+  type,
+  title,
+  message,
+  relatedId = null,
+}) {
+  const result = await pool.query(
+    `INSERT INTO notifications
+      (recipient_user_id, type, title, message, related_id)
+     VALUES ($1, $2, $3, $4, $5)
+     RETURNING *`,
+    [recipientUserId, type, title, message, relatedId]
+  );
 
-// Get notifications for the currently logged-in user
-router.get('/', authenticate, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `SELECT *
-       FROM notifications
-       WHERE recipient_user_id = $1
-       ORDER BY created_at DESC`,
-      [req.auth.id]
-    );
+  return result.rows[0];
+}
 
-    res.json(result.rows);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      error: 'Server error',
+async function notifyAdmins({
+  type,
+  title,
+  message,
+  relatedId = null,
+  emailSubject,
+  emailMessage,
+}) {
+  const result = await pool.query(
+    `SELECT id, name, email
+     FROM users
+     WHERE LOWER(role) = 'admin'`
+  );
+
+  for (const admin of result.rows) {
+    await createNotification({
+      recipientUserId: admin.id,
+      type,
+      title,
+      message,
+      relatedId,
     });
-  }
-});
 
-// Mark one notification as read
-router.patch('/:id/read', authenticate, async (req, res) => {
-  try {
-    const result = await pool.query(
-      `UPDATE notifications
-       SET is_read = true
-       WHERE id = $1
-         AND recipient_user_id = $2
-       RETURNING *`,
-      [req.params.id, req.auth.id]
-    );
-
-    if (result.rows.length === 0) {
-      return res.status(404).json({
-        error: 'Notification not found.',
+    if (admin.email) {
+      await sendEmail({
+        to: admin.email,
+        subject: emailSubject || title,
+        html: `
+          <p>Hi ${admin.name || 'Admin'},</p>
+          <p>${emailMessage || message}</p>
+          <p>— PropertyPro</p>
+        `,
       });
     }
+  }
+}
 
-    res.json(result.rows[0]);
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      error: 'Server error',
+async function notifyTenantByTenantId({
+  tenantId,
+  type,
+  title,
+  message,
+  relatedId = null,
+  emailSubject,
+  emailMessage,
+}) {
+  const result = await pool.query(
+    `SELECT u.id, u.name, u.email
+     FROM users u
+     JOIN tenants t
+       ON LOWER(u.email) = LOWER(t.email)
+     WHERE t.id = $1
+       AND LOWER(u.role) = 'tenant'
+     LIMIT 1`,
+    [tenantId]
+  );
+
+  if (result.rows.length === 0) return null;
+
+  const tenant = result.rows[0];
+
+  const notification = await createNotification({
+    recipientUserId: tenant.id,
+    type,
+    title,
+    message,
+    relatedId,
+  });
+
+  if (tenant.email) {
+    await sendEmail({
+      to: tenant.email,
+      subject: emailSubject || title,
+      html: `
+        <p>Hi ${tenant.name || 'Tenant'},</p>
+        <p>${emailMessage || message}</p>
+        <p>— PropertyPro</p>
+      `,
     });
   }
-});
 
-// Mark all notifications as read
-router.patch('/read-all', authenticate, async (req, res) => {
-  try {
-    await pool.query(
-      `UPDATE notifications
-       SET is_read = true
-       WHERE recipient_user_id = $1
-         AND is_read = false`,
-      [req.auth.id]
-    );
+  return notification;
+}
 
-    res.json({
-      message: 'All notifications marked as read.',
-    });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({
-      error: 'Server error',
-    });
-  }
-});
-
-module.exports = router;
+module.exports = {
+  createNotification,
+  notifyAdmins,
+  notifyTenantByTenantId,
+};
