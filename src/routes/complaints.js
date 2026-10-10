@@ -1,11 +1,9 @@
+
 const express = require('express');
 const router = express.Router();
 const pool = require('../db');
 
-const {
-  authenticate,
-  requireRoles,
-} = require('../middleware/auth');
+const { authenticate, requireRoles } = require('../middleware/auth');
 
 const {
   notifyAdmins,
@@ -13,31 +11,31 @@ const {
 } = require('../services/notifications');
 
 // GET complaints
-// Admins can see all complaints.
-// Tenants can see only their own complaints.
 router.get('/', authenticate, async (req, res) => {
   try {
     const role = String(req.auth?.role || '').toLowerCase();
 
     if (role === 'admin') {
-      const result = await pool.query(
-        `SELECT mc.*, t.name AS tenant_name, t.email AS tenant_email
-         FROM maintenance_complaints mc
-         JOIN tenants t ON t.id = mc.tenant_id
-         ORDER BY mc.id DESC`
-      );
+      const result = await pool.query(`
+        SELECT mc.*, t.name AS tenant_name, t.email AS tenant_email
+        FROM maintenance_complaints mc
+        JOIN tenants t ON t.id = mc.tenant_id
+        ORDER BY mc.id DESC
+      `);
 
       return res.json(result.rows);
     }
 
     if (role === 'tenant') {
       const result = await pool.query(
-        `SELECT mc.*, t.name AS tenant_name, t.email AS tenant_email
-         FROM maintenance_complaints mc
-         JOIN tenants t ON t.id = mc.tenant_id
-         JOIN users u ON LOWER(u.email) = LOWER(t.email)
-         WHERE u.id = $1
-         ORDER BY mc.id DESC`,
+        `
+        SELECT mc.*, t.name AS tenant_name, t.email AS tenant_email
+        FROM maintenance_complaints mc
+        JOIN tenants t ON t.id = mc.tenant_id
+        JOIN users u ON LOWER(u.email) = LOWER(t.email)
+        WHERE u.id = $1
+        ORDER BY mc.id DESC
+        `,
         [req.auth.id]
       );
 
@@ -48,52 +46,76 @@ router.get('/', authenticate, async (req, res) => {
       error: 'You do not have permission to view complaints.',
     });
   } catch (error) {
-    console.error(error);
-    return res.status(500).json({
-      error: 'Server error',
-    });
+    console.error('Get complaints error:', error);
+    return res.status(500).json({ error: 'Server error' });
   }
 });
 
 // POST a new complaint
-// Tenant only.
 router.post(
   '/',
   authenticate,
   requireRoles('tenant'),
   async (req, res) => {
     try {
-      const { category, description, property_id } = req.body;
+      const { category, description } = req.body;
 
-      if (!category || !description || !property_id) {
+      if (
+        typeof category !== 'string' ||
+        !category.trim() ||
+        typeof description !== 'string' ||
+        !description.trim()
+      ) {
         return res.status(400).json({
-          error: 'Category, description, and property are required.',
+          error: 'Category and description are required.',
         });
       }
 
+      // Find the tenant and retrieve their property ID from the database.
       const tenantResult = await pool.query(
-        `SELECT t.id, t.name, t.email
-         FROM tenants t
-         JOIN users u ON LOWER(u.email) = LOWER(t.email)
-         WHERE u.id = $1
-         LIMIT 1`,
+        `
+        SELECT t.id, t.name, t.email, t.property_id
+        FROM tenants t
+        JOIN users u ON LOWER(u.email) = LOWER(t.email)
+        WHERE u.id = $1
+        LIMIT 1
+        `,
         [req.auth.id]
       );
 
       if (tenantResult.rows.length === 0) {
         return res.status(404).json({
-          error: 'Tenant record not found.',
+          error:
+            'Tenant record not found. Please contact your property manager.',
         });
       }
 
       const tenant = tenantResult.rows[0];
 
+      if (
+        tenant.property_id === null ||
+        tenant.property_id === undefined ||
+        tenant.property_id === ''
+      ) {
+        return res.status(400).json({
+          error:
+            'No property is linked to your tenant account. Please contact your property manager.',
+        });
+      }
+
       const complaintResult = await pool.query(
-        `INSERT INTO maintenance_complaints
+        `
+        INSERT INTO maintenance_complaints
           (tenant_id, property_id, category, description)
-         VALUES ($1, $2, $3, $4)
-         RETURNING *`,
-        [tenant.id, property_id, category, description]
+        VALUES ($1, $2, $3, $4)
+        RETURNING *
+        `,
+        [
+          tenant.id,
+          tenant.property_id,
+          category.trim(),
+          description.trim(),
+        ]
       );
 
       const complaint = complaintResult.rows[0];
@@ -101,22 +123,20 @@ router.post(
       await notifyAdmins({
         type: 'complaint_created',
         title: 'New maintenance complaint',
-        message: `${tenant.name} submitted a new ${category} complaint.`,
+        message: `${tenant.name} submitted a new ${category.trim()} complaint.`,
         relatedId: complaint.id,
         emailSubject: 'New PropertyPro complaint',
         emailMessage: `
           <p><strong>${tenant.name}</strong> has submitted a new maintenance complaint.</p>
-          <p><strong>Category:</strong> ${category}</p>
-          <p><strong>Description:</strong> ${description}</p>
+          <p><strong>Category:</strong> ${category.trim()}</p>
+          <p><strong>Description:</strong> ${description.trim()}</p>
         `,
       });
 
       return res.status(201).json(complaint);
     } catch (error) {
-      console.error(error);
-      return res.status(500).json({
-        error: 'Server error',
-      });
+      console.error('Create complaint error:', error);
+      return res.status(500).json({ error: 'Server error' });
     }
   }
 );
@@ -130,7 +150,10 @@ router.put(
     try {
       const { admin_response, status = 'in_progress' } = req.body;
 
-      if (!admin_response) {
+      if (
+        typeof admin_response !== 'string' ||
+        !admin_response.trim()
+      ) {
         return res.status(400).json({
           error: 'Admin response is required.',
         });
@@ -145,13 +168,15 @@ router.put(
       }
 
       const result = await pool.query(
-        `UPDATE maintenance_complaints
-         SET admin_response = $1,
-             status = $2,
-             responded_at = NOW()
-         WHERE id = $3
-         RETURNING *`,
-        [admin_response, status, req.params.id]
+        `
+        UPDATE maintenance_complaints
+        SET admin_response = $1,
+            status = $2,
+            responded_at = NOW()
+        WHERE id = $3
+        RETURNING *
+        `,
+        [admin_response.trim(), status, req.params.id]
       );
 
       if (result.rows.length === 0) {
@@ -172,17 +197,15 @@ router.put(
         emailMessage: `
           <p>An administrator has responded to your complaint.</p>
           <p><strong>Category:</strong> ${complaint.category}</p>
-          <p><strong>Response:</strong> ${admin_response}</p>
+          <p><strong>Response:</strong> ${admin_response.trim()}</p>
           <p><strong>Status:</strong> ${status}</p>
         `,
       });
 
       return res.json(complaint);
     } catch (error) {
-      console.error(error);
-      return res.status(500).json({
-        error: 'Server error',
-      });
+      console.error('Respond to complaint error:', error);
+      return res.status(500).json({ error: 'Server error' });
     }
   }
 );
@@ -195,11 +218,13 @@ router.put(
   async (req, res) => {
     try {
       const result = await pool.query(
-        `UPDATE maintenance_complaints
-         SET status = 'resolved',
-             responded_at = COALESCE(responded_at, NOW())
-         WHERE id = $1
-         RETURNING *`,
+        `
+        UPDATE maintenance_complaints
+        SET status = 'resolved',
+            responded_at = COALESCE(responded_at, NOW())
+        WHERE id = $1
+        RETURNING *
+        `,
         [req.params.id]
       );
 
@@ -226,10 +251,8 @@ router.put(
 
       return res.json(complaint);
     } catch (error) {
-      console.error(error);
-      return res.status(500).json({
-        error: 'Server error',
-      });
+      console.error('Resolve complaint error:', error);
+      return res.status(500).json({ error: 'Server error' });
     }
   }
 );
